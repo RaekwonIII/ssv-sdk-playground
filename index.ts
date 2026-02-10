@@ -4,18 +4,17 @@ import { hoodi } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { readdir } from 'node:fs/promises'
 
-const KEYSTORE_DIR = "../dev/ethstaker_deposit-cli-b13dcb9-linux-amd64/validator_keys/keystore-m_12381_3600_0_0_0-1770287966.json"
-
-// Setup viem clients
 const privateKey = process.env.PRIVATE_KEY as `0x${string}`
-// const chain = chains.hoodi;
 const subgraphEndpoint = process.env.SUBGRAPH_ENDPOINT;
 const subgraphApiKey = process.env.SUBGRAPH_API_KEY;
+const keystoreDir = process.env.KEYSTORE_DIR
+const keystorePass = process.env.KEYSTORE_PASS
+const ownerAddress = process.env.OWNER_ADDRESS
 
 async function loadKeystores(): Promise<string[]> {
 
   try{
-    const files = await readdir(KEYSTORE_DIR)
+    const files = await readdir(keystoreDir)
     const keystores: string[] = []
     for (const file of files) {
         const content = await Bun.file(file).text();
@@ -59,14 +58,14 @@ async function main() {
     }
   });
   
-  const ownerAddress = "0xaA184b86B4cdb747F4A3BF6e6FCd5e27c1d92c5c"
+  
   let nonce = Number(await sdk.api.getOwnerNonce({ owner: ownerAddress}))
   let operatorIds = ["1","2","3","4"]
   let operators = await sdk.api.getOperators({operatorIds})
 
   const keysharesPayload = await sdk.utils.generateKeyShares({
     keystore: keystores,
-    keystore_password: '#Il1k3turtlez' ,
+    keystore_password: keystorePass,
     operator_keys: operators.map((operator) => operator.publicKey),
     operator_ids: operators.map((operator) => parseInt(operator.id)),
     owner_address: ownerAddress as string,
