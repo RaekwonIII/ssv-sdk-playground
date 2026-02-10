@@ -1,66 +1,86 @@
-import { SSVSDK } from "ssv-sdk";
-import { createValidatorKeys } from "ssv-sdk/dist/libs/utils/methods/create-validator-keys";
-console.log("SSVSDK:", SSVSDK);
+import { SSVSDK } from '@ssv-labs/ssv-sdk'
+import { createPublicClient, createWalletClient, http } from 'viem'
+import { hoodi } from 'viem/chains'
+import { privateKeyToAccount } from 'viem/accounts'
+import { readdir } from 'node:fs/promises'
 
-const sdk = new SSVSDK({
-  chain: "holesky",
-  private_key: "0x_your_private_key_here",
-});
+const KEYSTORE_DIR = "../dev/ethstaker_deposit-cli-b13dcb9-linux-amd64/validator_keys/keystore-m_12381_3600_0_0_0-1770287966.json"
 
-// (async () => {
-//   // api usage
-//   const operator = await sdk.api.getOperator({ id: "844" });
+// Setup viem clients
+const privateKey = process.env.PRIVATE_KEY as `0x${string}`
+// const chain = chains.hoodi;
+const subgraphEndpoint = process.env.SUBGRAPH_ENDPOINT;
+const subgraphApiKey = process.env.SUBGRAPH_API_KEY;
 
-//   // direct contract interaction (read)
-//   const contractOperator = await sdk.contract.ssv.read.getOperatorById({
-//     operatorId: 844n,
-//   });
+async function loadKeystores(): Promise<string[]> {
 
-//   // direct contract interaction (write)
-//   const tx = await sdk.contract.ssv.write.registerOperator({
-//     args: {
-//       publicKey: `0x...`,
-//       fee: 10000000000n,
-//       setPrivate: true,
-//     },
-//   });
+  try{
+    const files = await readdir(KEYSTORE_DIR)
+    const keystores: string[] = []
+    for (const file of files) {
+        const content = await Bun.file(file).text();
+        const data = JSON.stringify(content);
+      keystores.push(data)
+    }
+    return keystores;
+  } catch (error) {
+    console.error("Failed to read keystore.json:", error);
+    throw new Error("Failed to load keystore. Please check keystore.json exists and is valid.");
+  }
+}
 
-//   // to wait for the transaction to be mined
-//   await tx.wait();
+async function main() {
+  // Setup viem clients
+  const formattedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+  const account = privateKeyToAccount(formattedPrivateKey as `0x${string}`);
+  const keystores = await loadKeystores()
 
-//   // smart functions that will send the transaction for you
-//   const { keystores } = await createValidatorKeys({
-//     count: 1,
-//     chain: "holesky",
-//     withdrawal: `0x...`,
-//     password: "123123123",
-//   });
+  const transport = http();
+  const publicClient = createPublicClient({
+    chain: hoodi,
+    transport,
+  });
 
-//   // 1st way to register validators -----------------------
-//   const extracted = await sdk.utils.generateKeyShares({
-//     keystore: JSON.stringify(keystores[0]),
-//     keystore_password: "123123123",
-//     operator_keys: [],
-//     operator_ids: [],
-//     owner_address: `0x...`,
-//     nonce: 1,
-//   });
+  const walletClient = createWalletClient({
+    account,
+    chain: hoodi,
+    transport,
+  });
 
-//   const receipt = await sdk.clusters
-//     .registerValidators({
-//       keyshares: [extracted],
-//     })
-//     .then((tx) => tx.wait());
-//   // ----------------------------------------------------------------
+  // Initialize SDK with viem clients
+  const sdk = new SSVSDK({
+    publicClient: publicClient as any,
+    walletClient: walletClient as any,
+    extendedConfig: {
+      subgraph: {
+        apiKey: subgraphApiKey,
+        endpoint: subgraphEndpoint,
+      }
+    }
+  });
+  
+  const ownerAddress = "0xaA184b86B4cdb747F4A3BF6e6FCd5e27c1d92c5c"
+  let nonce = Number(await sdk.api.getOwnerNonce({ owner: ownerAddress}))
+  let operatorIds = ["1","2","3","4"]
+  let operators = await sdk.api.getOperators({operatorIds})
 
-//   // 2nd way to register validators -----------------------
-//   const shares = await sdk.utils.createShares({
-//     operatorIds: [],
-//     keyshares: "", // a keyshares file string or an object
-//   });
+  const keysharesPayload = await sdk.utils.generateKeyShares({
+    keystore: keystores,
+    keystore_password: '#Il1k3turtlez' ,
+    operator_keys: operators.map((operator) => operator.publicKey),
+    operator_ids: operators.map((operator) => parseInt(operator.id)),
+    owner_address: ownerAddress as string,
+    nonce: nonce,
+  })
 
-//   const receipt = await sdk.clusters
-//     .registerValidators({ keyshares: shares.available })
-//     .then((tx) => tx.wait());
-//   // ----------------------------------------------------------------
-// })();
+  const txnReceipt = await sdk.clusters.registerValidators({
+    args: {
+      keyshares: keysharesPayload,
+      depositAmount: 100000n, // Placeholder - actual deposit amount should be set based on requirements
+    },
+  }).then(tx => tx.wait());
+
+  console.log(txnReceipt.transactionHash)
+}
+
+main();
